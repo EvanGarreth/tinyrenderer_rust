@@ -1,83 +1,82 @@
+extern crate cgmath;
 extern crate tgaimage_sys;
+
 use std::ffi::CString;
 use tgaimage_sys as tgaimage;
 
-mod geometry;
-
-fn line(
-    p1: geometry::Point,
-    p2: geometry::Point,
-    image: &mut tgaimage::TGAImage,
-    color: &mut tgaimage::TGAColor,
-) {
-    let mut x1 = p1.get_x();
-    let mut x2 = p2.get_x();
-    let mut y1 = p1.get_y();
-    let mut y2 = p2.get_y();
-
-    let x_diff = x1 - x2;
-    let y_diff = y1 - y2;
-    let steep = x_diff.abs() < y_diff.abs();
-    // transpose the image
-    if steep {
-        std::mem::swap(&mut x1, &mut y1);
-        std::mem::swap(&mut x2, &mut y2);
-    }
-    if x1 > x2 {
-        std::mem::swap(&mut x1, &mut x2);
-        std::mem::swap(&mut y1, &mut y2);
-    }
-
-    let dx = x2 - x1;
-    let dy = y2 - y1;
-    let derror2 = dy.abs() * 2;
-    let mut error2 = 0;
-    let mut y = y1;
-    for x in x1..x2 {
-        unsafe {
-            if steep {
-                // remove the transpose
-                tgaimage::TGAImage_set(image, y, x, color);
-            } else {
-                tgaimage::TGAImage_set(image, x, y, color);
-            }
-        }
-        error2 += derror2;
-        if error2 > dx {
-            y += if y2 > y1 { 1 } else { -1 };
-            error2 -= dx * 2;
-        }
-    }
+fn barycentric(points: &Vec<cgmath::Vector2<i32>>, x: i32, y: i32) -> cgmath::Vector3<f64> {
+    
+    let v1 = cgmath::vec3(points[2].x-points[0].x,
+                          points[1].x-points[0].x,
+                          points[0].x-x,
+                          );
+    let v2 = cgmath::vec3(points[2].y-points[0].y,
+                          points[1].y-points[0].y,
+                          points[0].y-y,
+                          );
+    let u = v1.cross(v2);
+    if u.z.abs() < 1 { return cgmath::vec3(-1., 1., 1.); } //degenerate triangle
+    // convert to floats for a precise result
+    return cgmath::vec3(1. - (u.x as f64 + u.y as f64) / u.z as f64,
+                        u.y as f64 / u.z as f64,
+                        u.x as f64 / u.z as f64,
+                        );
 }
 
 unsafe fn triangle(
-    p1 : geometry::Point,
-    p2 : geometry::Point,
-    p3 : geometry::Point,
+    points: &Vec<cgmath::Vector2<i32>>,
     image: &mut tgaimage::TGAImage,
     color: &mut tgaimage::TGAColor,
-)
-{
-    line(p1, p2, image, color);
-    line(p2, p3, image, color);
-    line(p3, p1, image, color);
+) {
+    //points.sort_by(|a, b| a.y.cmp(&b.y));
+    let mut bounding_box_min = cgmath::vec2(image.get_width() - 1, image.get_height() - 1);
+    let mut bounding_box_max = cgmath::vec2(0, 0);
+
+    // use a clamp to keep triangles within max image bounds ( dont draw triangles with coords
+    // outside the image range)
+    let clamp = cgmath::vec2(image.get_width() - 1, image.get_height() - 1);
+
+    //determine the min/max x and y values to determine the bounds to draw in
+    for i in 0..3 {
+        for j in 0..2 {
+            bounding_box_min[j] =
+                std::cmp::max(0, std::cmp::min(bounding_box_min[j], points[i][j]));
+            bounding_box_max[j] =
+                std::cmp::min(clamp[j], std::cmp::max(bounding_box_max[j], points[i][j]));
+        }
+    }
+
+    // check all pixels in the resulting bounding box and color them if they lay within a triangle
+    for x in bounding_box_min.x..bounding_box_max.x+1 {
+        for y in bounding_box_min.y..bounding_box_max.y+1 {
+            let barycentric_screen = barycentric(&points, x, y);
+            // if any of x,y,z are negative then point is not inside the triangle
+            if barycentric_screen.x < 0. || barycentric_screen.y < 0. || barycentric_screen.z < 0. {
+                continue;
+            }
+            image.set(x, y, color);
+        }
+    }
 }
 
-
 fn main() {
-    let x1 = geometry::Point::new(10, 70, 1);
-    let x2 = geometry::Point::new(50, 160, 1);
-    let x3 = geometry::Point::new(70, 80, 1);
+    let t1 = vec![
+        cgmath::vec2(10, 70),
+        cgmath::vec2(50, 160),
+        cgmath::vec2(70, 80),
+    ];
 
-    let a1 = geometry::Point::new(180, 50, 1);
-    let a2 = geometry::Point::new(150, 1, 1);
-    let a3 = geometry::Point::new(70, 180, 1);
+    let t2 = vec![
+        cgmath::vec2(180, 50),
+        cgmath::vec2(150, 1),
+        cgmath::vec2(70, 180),
+    ];
 
-    let b1 = geometry::Point::new(180, 150, 1);
-    let b2 = geometry::Point::new(120, 160, 1);
-    let b3 = geometry::Point::new(130, 180, 1);
-
-
+    let t3 = vec![
+        cgmath::vec2(180, 150),
+        cgmath::vec2(120, 160),
+        cgmath::vec2(130, 180),
+    ];
 
     unsafe {
         let mut image = tgaimage::TGAImage::new1(200, 200, tgaimage::TGAImage_Format::RGBA as i32);
@@ -86,10 +85,9 @@ fn main() {
         let mut red: tgaimage::TGAColor = tgaimage::TGAColor::new1(255, 0, 0, 255);
         let mut green: tgaimage::TGAColor = tgaimage::TGAColor::new1(0, 255, 0, 255);
 
-
-        triangle(x1, x2, x3, &mut image, &mut red);
-        triangle(a1, a2, a3, &mut image, &mut white);
-        triangle(b1, b2, b3, &mut image, &mut green);
+        triangle(&t1, &mut image, &mut red);
+        triangle(&t2, &mut image, &mut white);
+        triangle(&t3, &mut image, &mut green);
 
         tgaimage::TGAImage_flip_vertically(&mut image);
         tgaimage::TGAImage_write_tga_file(
