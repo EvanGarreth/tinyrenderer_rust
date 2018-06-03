@@ -4,5 +4,7 @@ version = "0.1.0"
 authors = ["Evan Campbell <evan.garreth@gmail.com>"]
 
 [dependencies]
-tgaimage-sys = "0.1.0"
-cgmath 	     = "0.16.1"
+tgaimage-sys  = "0.1.0"
+cgmath 	      = "0.16.1"
+wavefront_obj = "5.1.0"
+rand          = "0.5"

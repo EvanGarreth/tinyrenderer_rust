@@ -1,55 +1,70 @@
 extern crate cgmath;
+extern crate rand;
 extern crate tgaimage_sys;
+//extern crate wavefront_obj;
 
+mod obj;
+use cgmath::InnerSpace;
 use std::ffi::CString;
 use tgaimage_sys as tgaimage;
+//use wavefront_obj::obj::ObjSet;
 
-fn barycentric(points: &Vec<cgmath::Vector2<i32>>, x: i32, y: i32) -> cgmath::Vector3<f64> {
-    
-    let v1 = cgmath::vec3(points[2].x-points[0].x,
-                          points[1].x-points[0].x,
-                          points[0].x-x,
-                          );
-    let v2 = cgmath::vec3(points[2].y-points[0].y,
-                          points[1].y-points[0].y,
-                          points[0].y-y,
-                          );
+fn barycentric(points: &Vec<cgmath::Vector2<f64>>, x: i32, y: i32) -> cgmath::Vector3<f64> {
+    let v1 = cgmath::vec3(
+        points[2].x - points[0].x,
+        points[1].x - points[0].x,
+        points[0].x - x as f64,
+    );
+    let v2 = cgmath::vec3(
+        points[2].y - points[0].y,
+        points[1].y - points[0].y,
+        points[0].y - y as f64,
+    );
     let u = v1.cross(v2);
-    if u.z.abs() < 1 { return cgmath::vec3(-1., 1., 1.); } //degenerate triangle
+    // degenerate triangle
+    if u.z.abs() < 1. {
+        return cgmath::vec3(-1., 1., 1.);
+    }
     // convert to floats for a precise result
-    return cgmath::vec3(1. - (u.x as f64 + u.y as f64) / u.z as f64,
-                        u.y as f64 / u.z as f64,
-                        u.x as f64 / u.z as f64,
-                        );
+    return cgmath::vec3(1. - (u.x + u.y) / u.z, u.y / u.z, u.x / u.z);
 }
 
 unsafe fn triangle(
-    points: &Vec<cgmath::Vector2<i32>>,
+    points: &Vec<cgmath::Vector2<f64>>,
     image: &mut tgaimage::TGAImage,
     color: &mut tgaimage::TGAColor,
 ) {
     //points.sort_by(|a, b| a.y.cmp(&b.y));
-    let mut bounding_box_min = cgmath::vec2(image.get_width() - 1, image.get_height() - 1);
-    let mut bounding_box_max = cgmath::vec2(0, 0);
+    let mut bounding_box_min = cgmath::vec2(
+        (image.get_width() - 1) as f64,
+        (image.get_height() - 1) as f64,
+    );
+    let mut bounding_box_max = cgmath::vec2(0., 0.);
 
     // use a clamp to keep triangles within max image bounds ( dont draw triangles with coords
     // outside the image range)
-    let clamp = cgmath::vec2(image.get_width() - 1, image.get_height() - 1);
+    let clamp = cgmath::vec2(
+        (image.get_width() - 1) as f64,
+        (image.get_height() - 1) as f64,
+    );
 
     //determine the min/max x and y values to determine the bounds to draw in
     for i in 0..3 {
         for j in 0..2 {
-            bounding_box_min[j] =
-                std::cmp::max(0, std::cmp::min(bounding_box_min[j], points[i][j]));
-            bounding_box_max[j] =
-                std::cmp::min(clamp[j], std::cmp::max(bounding_box_max[j], points[i][j]));
+            let _min = points[i][j].min(bounding_box_min[j] as f64);
+            let _max = points[i][j].max(bounding_box_max[j]);
+            bounding_box_min[j] = _min.max(0.0);
+            bounding_box_max[j] = _max.min(clamp[j]);
         }
     }
 
+    let (x_min, y_min) = (bounding_box_min.x as i32, bounding_box_min.y as i32);
+    let (x_max, y_max) = (bounding_box_max.x as i32 + 1, bounding_box_max.y as i32 + 1);
+
     // check all pixels in the resulting bounding box and color them if they lay within a triangle
-    for x in bounding_box_min.x..bounding_box_max.x+1 {
-        for y in bounding_box_min.y..bounding_box_max.y+1 {
-            let barycentric_screen = barycentric(&points, x, y);
+    for x in x_min..x_max {
+        for y in y_min..y_max {
+            let barycentric_screen = barycentric(points, x, y);
             // if any of x,y,z are negative then point is not inside the triangle
             if barycentric_screen.x < 0. || barycentric_screen.y < 0. || barycentric_screen.z < 0. {
                 continue;
@@ -60,34 +75,44 @@ unsafe fn triangle(
 }
 
 fn main() {
-    let t1 = vec![
-        cgmath::vec2(10, 70),
-        cgmath::vec2(50, 160),
-        cgmath::vec2(70, 80),
-    ];
-
-    let t2 = vec![
-        cgmath::vec2(180, 50),
-        cgmath::vec2(150, 1),
-        cgmath::vec2(70, 180),
-    ];
-
-    let t3 = vec![
-        cgmath::vec2(180, 150),
-        cgmath::vec2(120, 160),
-        cgmath::vec2(130, 180),
-    ];
-
+    let object = obj::Model::new("src/assets/head.obj");
+    let light_dir = cgmath::vec3(0., 0., -1.);
     unsafe {
-        let mut image = tgaimage::TGAImage::new1(200, 200, tgaimage::TGAImage_Format::RGBA as i32);
+        let mut image =
+            tgaimage::TGAImage::new1(2000, 2000, tgaimage::TGAImage_Format::RGBA as i32);
 
-        let mut white: tgaimage::TGAColor = tgaimage::TGAColor::new1(255, 255, 255, 255);
-        let mut red: tgaimage::TGAColor = tgaimage::TGAColor::new1(255, 0, 0, 255);
-        let mut green: tgaimage::TGAColor = tgaimage::TGAColor::new1(0, 255, 0, 255);
+        let height = image.get_height() as f64;
+        let width = image.get_width() as f64;
 
-        triangle(&t1, &mut image, &mut red);
-        triangle(&t2, &mut image, &mut white);
-        triangle(&t3, &mut image, &mut green);
+        for face in &object.faces {
+            // holds the objects vertex coords manipulated to fit within the image bounds
+            let mut screen_coords: Vec<cgmath::Vector2<f64>> = Vec::new();
+            // the coords of the object as given
+            let mut world_coords: Vec<cgmath::Vector3<f64>> = Vec::new();
+
+            for vector in face {
+                let vector = *object.get_vertex(*vector as usize);
+                world_coords.push(vector);
+                // fit the x,y world coords to the bounds of the 2d image
+                screen_coords.push(cgmath::vec2(
+                    (vector.x + 1.) * width / 2.,
+                    (vector.y + 1.) * height / 2.,
+                ));
+            }
+            // normalize the cross product of the two sides of the current triangle and scale the
+            // light_dir vector by it to determine the intensity of the color of the triangle
+            let n = (world_coords[2] - world_coords[0])
+                .cross(world_coords[1] - world_coords[0])
+                .normalize();
+            let intensity = n.dot(light_dir);
+            if intensity > 0. {
+                let intensity = (intensity * 255.) as u8;
+                // usually the rgb values would be the same and result in varying shades of
+                // white/grey, but I was having fun with the colors
+                let mut color = tgaimage::TGAColor::new1(150, color, color, 255);
+                triangle(&screen_coords, &mut image, &mut color);
+            }
+        }
 
         tgaimage::TGAImage_flip_vertically(&mut image);
         tgaimage::TGAImage_write_tga_file(
