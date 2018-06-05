@@ -90,10 +90,11 @@ unsafe fn triangle(
                     uv.y as i32,
                 );
 
-                // multiply by the intensity for basic lighting, fix alpha being 0
-                color.bgra[0] = (color.bgra[0] as f64 * intensity) as u8;
-                color.bgra[1] = (color.bgra[1] as f64 * intensity) as u8;
-                color.bgra[2] = (color.bgra[2] as f64 * intensity) as u8;
+                // multiply by the intensity for basic lighting
+                for i in 0..3 {
+                    color.bgra[i] = (color.bgra[i] as f64 * intensity) as u8;
+                }
+                // fix alpha
                 color.bgra[3] = 255;
 
                 image.set(x, y, &mut color);
