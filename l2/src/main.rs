@@ -109,7 +109,7 @@ fn main() {
                 let intensity = (intensity * 255.) as u8;
                 // usually the rgb values would be the same and result in varying shades of
                 // white/grey, but I was having fun with the colors
-                let mut color = tgaimage::TGAColor::new1(150, color, color, 255);
+                let mut color = tgaimage::TGAColor::new1(150, intensity, intensity, 255);
                 triangle(&screen_coords, &mut image, &mut color);
             }
         }

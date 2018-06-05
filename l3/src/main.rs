@@ -32,9 +32,11 @@ fn barycentric(
 
 unsafe fn triangle(
     points: &Vec<cgmath::Vector3<f64>>,
+    texture_coords: &Vec<cgmath::Vector3<f64>>,
     zbuffer: &mut Vec<f64>,
     image: &mut tgaimage::TGAImage,
-    color: &mut tgaimage::TGAColor,
+    diffuse: &mut tgaimage::TGAImage,
+    intensity: f64,
 ) {
     let width = image.get_width() as f64;
     let height = image.get_height() as f64;
@@ -63,18 +65,38 @@ unsafe fn triangle(
         for y in y_min..y_max {
             let mut point = cgmath::vec3(x as f64, y as f64, 0.);
             let barycentric_screen = barycentric(points, point);
+            
             // if any of x,y,z are negative then point is not inside the triangle
             if barycentric_screen.x < 0. || barycentric_screen.y < 0. || barycentric_screen.z < 0. {
                 continue;
             }
+            
             // this bit of math I don't fuly understand
             point.z += points[0].z * barycentric_screen.x + points[1].z * barycentric_screen.y
                 + points[2].z * barycentric_screen.z;
             let index = (point.x + point.y * width) as usize;
+            
             // draw the point if it is closer to the screen than the current zbuffer value
             if zbuffer[index] < point.z {
                 zbuffer[index] = point.z;
-                image.set(x, y, color);
+
+                // interpolate the vertices w/ barycentric coords to determine the points x,y
+                let mut uv = barycentric_screen.x*texture_coords[0] + 
+                            barycentric_screen.y*texture_coords[1]+
+                            barycentric_screen.z*texture_coords[2];
+
+                let mut color = diffuse.get(
+                    uv.x as i32,
+                    uv.y as i32,
+                );
+
+                // multiply by the intensity for basic lighting, fix alpha being 0
+                color.bgra[0] = (color.bgra[0] as f64 * intensity) as u8;
+                color.bgra[1] = (color.bgra[1] as f64 * intensity) as u8;
+                color.bgra[2] = (color.bgra[2] as f64 * intensity) as u8;
+                color.bgra[3] = 255;
+
+                image.set(x, y, &mut color);
             }
         }
     }
@@ -86,6 +108,15 @@ fn main() {
     unsafe {
         let mut image =
             tgaimage::TGAImage::new1(2000, 2000, tgaimage::TGAImage_Format::RGBA as i32);
+        let mut diffuse =
+            tgaimage::TGAImage::new1(2000, 2000, tgaimage::TGAImage_Format::RGBA as i32);
+        tgaimage::TGAImage_read_tga_file(
+            &mut diffuse,
+            CString::new("src/assets/head_diffuse.tga")
+                .unwrap()
+                .as_ptr(),
+        );
+        diffuse.flip_vertically();
 
         let height = image.get_height() as f64;
         let width = image.get_width() as f64;
@@ -97,10 +128,12 @@ fn main() {
             let mut screen_coords: Vec<cgmath::Vector3<f64>> = Vec::new();
             // the coords of the object as given
             let mut world_coords: Vec<cgmath::Vector3<f64>> = Vec::new();
+            let mut texture_coords: Vec<cgmath::Vector3<f64>> = Vec::new();
 
-            for vector in face {
-                let vector = *object.get_vertex(*vector as usize);
+            for vector in &face.vertices {
+                let vector = *object.get_vertex(*vector);
                 world_coords.push(vector);
+                // println!("{:?}", vector);
                 // fit the x,y world coords to the bounds of the 2d image
                 screen_coords.push(cgmath::vec3(
                     (vector.x + 1.) * width / 2.,
@@ -108,6 +141,16 @@ fn main() {
                     vector.z,
                 ));
             }
+
+            for indice in &face.texture_indices {
+                let coord = *object.get_texture_coord(*indice);
+                texture_coords.push(cgmath::vec3(
+                    coord.x * (diffuse.get_width() as f64),
+                    coord.y * (diffuse.get_height() as f64),
+                    1.,
+                ));
+            }
+
             // normalize the cross product of the two sides of the current triangle and scale the
             // light_dir vector by it to determine the intensity of the color of the triangle
             let n = (world_coords[2] - world_coords[0])
@@ -115,9 +158,16 @@ fn main() {
                 .normalize();
             let scalar = n.dot(light_dir);
             if scalar >= 0. {
-                let intensity = (scalar * 255.) as u8;
-                let mut color = tgaimage::TGAColor::new1(intensity, intensity, intensity, 255);
-                triangle(&screen_coords, &mut zbuffer, &mut image, &mut color);
+                // let intensity = (scalar * 255.) as u8;
+                //let mut color = tgaimage::TGAColor::new1(intensity, intensity, intensity, 255);
+                triangle(
+                    &screen_coords,
+                    &texture_coords,
+                    &mut zbuffer,
+                    &mut image,
+                    &mut diffuse,
+                    scalar,
+                );
             }
         }
 

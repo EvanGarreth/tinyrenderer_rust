@@ -5,16 +5,21 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 
+pub struct Face {
+    // vertices that make up a face
+    pub vertices: Vec<usize>,
+    // index to texture coords for the face
+    pub texture_indices: Vec<usize>,
+}
+
 //#[derive(Copy, Clone)]
 pub struct Model {
     // vector containing all vertices in an object
     pub vertices: Vec<cgmath::Vector3<f64>>,
-    // vector containing vectors of vectors containing indices to vectors that correspond to
-    // 0) vertex indices, 1) vertex texture coord indices, and 2) vertex normal indices
-    // ie faces[0][0][0] = first vertex indice for the first face
-    //    faces[0][1][0] = first vertex texture coord indice for the first face
-    //    faces[0][2][0] = first vertex normal indice for the first face
-    pub faces: Vec<Vec<i32>>,
+    // vector containit all vertex coordinates
+    pub texture_coords: Vec<cgmath::Vector3<f64>>,
+    // vector containing each face struct
+    pub faces: Vec<Face>,
 }
 
 impl Model {
@@ -23,7 +28,9 @@ impl Model {
         let reader = io::BufReader::new(file);
 
         let mut vertices: Vec<cgmath::Vector3<f64>> = Vec::new();
-        let mut faces: Vec<Vec<i32>> = Vec::new();
+        let mut texture_coords: Vec<cgmath::Vector3<f64>> = Vec::new();
+        let mut faces: Vec<Face> = Vec::new();
+
         for line in reader.lines() {
             let line = line.expect("Unable to read line");
             let mut split: Vec<&str> = line.split(" ").collect();
@@ -39,36 +46,39 @@ impl Model {
 
                 let vector = cgmath::vec3(x, y, z);
                 vertices.push(vector);
+            } else if &line[0..3] == "vt " {
+                let x: f64 = split[2].parse().unwrap();
+                let y: f64 = split[3].parse().unwrap();
+                let z: f64 = split[4].parse().unwrap();
+                let vector = cgmath::vec3(x, y, z);
+                texture_coords.push(vector);
             }
             // f denotes vertex indexes that make up a face
             else if &line[0..2] == "f " {
-                let mut face: Vec<i32> = Vec::new();
-                for vertex in split {
+                let mut vertices: Vec<usize> = Vec::new();
+                let mut texture_indices: Vec<usize> = Vec::new();
+                //let mut normals: Vec<i32> = Vec::new();
+
+                // ignore the first character "f"
+                for vertex in &split[1..] {
                     let group: Vec<&str> = vertex.split("/").collect();
-                    // semi set up for grabbing texture/normals, ignoring for now and just using
-                    // the vertices that make up a face
-                    for vector in group {
-                        if vector == "f" {
-                            continue;
-                        } // ignore the first element
-                        let vect: i32 = vector.parse().unwrap();
-                        face.push(vect - 1);
-                        break;
+                    let vect: usize = group[0].parse().unwrap();
+                    vertices.push(vect - 1);
+                    if group.len() > 2 && group[1] != "" {
+                        let vt: usize = group[1].parse().unwrap();
+                        texture_indices.push(vt - 1);
                     }
                 }
-                // currently face is [] on the first passthrough, TODO find the "rust way" to
-                // iterate over a collection, not important for now
-                if face.len() > 0 {
-                    faces.push(face)
-                }
+                let face = Face::new(vertices, texture_indices);
+                faces.push(face);
             }
-            //else {
-            //    println!("ELSE {:?}", line);
-            //}
         }
-        //println!("{:?}", vertices);
         //println!("{:?}", faces);
-        Model { vertices, faces }
+        Model {
+            vertices,
+            texture_coords,
+            faces,
+        }
     }
 
     pub fn num_vertices(self) -> usize {
@@ -80,5 +90,17 @@ impl Model {
     }
     pub fn get_vertex(&self, x: usize) -> &cgmath::Vector3<f64> {
         &self.vertices[x]
+    }
+    pub fn get_texture_coord(&self, x: usize) -> &cgmath::Vector3<f64> {
+        &self.texture_coords[x]
+    }
+}
+
+impl Face {
+    pub fn new(vertices: Vec<usize>, texture_indices: Vec<usize>) -> Face {
+        Face {
+            vertices,
+            texture_indices,
+        }
     }
 }
